@@ -12,6 +12,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -86,6 +88,7 @@ func New(db *store.DB, baseDir string, verbose bool, logger *slog.Logger) (*Clie
 		}
 	}
 
+	applyDeviceName(os.Getenv("WHATSAPP_DEVICE_NAME"))
 	client := whatsmeow.NewClient(deviceStore, waLogger)
 	if client == nil {
 		return nil, fmt.Errorf("failed to create client")
@@ -263,4 +266,16 @@ func (c *Client) resolvePreferredName(jid interface{}) string {
 	}
 
 	return parsedJID.User
+}
+
+// applyDeviceName names this linked device as the phone lists it under
+// Linked devices (whatsmeow's default is "whatsmeow"). It applies when the
+// device is linked: a device linked before keeps the name it was linked with.
+func applyDeviceName(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	wastore.SetOSInfo(name, [3]uint32{1, 0, 0})
+	wastore.DeviceProps.PlatformType = waCompanionReg.DeviceProps_DESKTOP.Enum()
 }

@@ -206,6 +206,7 @@ All data is stored in `~/.config/whatsapp-cli/`:
 | Variable          | Description                                          |
 | ----------------- | ---------------------------------------------------- |
 | `WHATSAPP_FORMAT` | Default output format (json, jsonl, csv, tsv, human) |
+| `WHATSAPP_DEVICE_NAME` | The name the phone lists this device under in Linked devices, set when it is linked (default `whatsmeow`) |
 | `XDG_CONFIG_HOME` | Override config directory base                       |
 
 ## AI Agent Integration
