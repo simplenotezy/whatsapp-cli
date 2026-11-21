@@ -15,7 +15,8 @@ var groupsCmd = &cobra.Command{
 	Use:   "groups [jid]",
 	Short: "List groups or show group info",
 	Long: `Without arguments, lists all groups.
-With a JID, shows detailed group info including members.`,
+With a JID, shows detailed group info including members.
+With --members, shows that info for every joined group, read in one request.`,
 	RunE: runGroups,
 }
 
@@ -40,7 +41,10 @@ var groupsRenameCmd = &cobra.Command{
 	RunE:  runGroupsRename,
 }
 
+var groupsMembers bool
+
 func init() {
+	groupsCmd.Flags().BoolVar(&groupsMembers, "members", false, "Show every joined group with its members")
 	rootCmd.AddCommand(groupsCmd)
 	groupsCmd.AddCommand(groupsJoinCmd)
 	groupsCmd.AddCommand(groupsLeaveCmd)
@@ -48,6 +52,9 @@ func init() {
 }
 
 func runGroups(cmd *cobra.Command, args []string) error {
+	if groupsMembers && len(args) > 0 {
+		return fmt.Errorf("--members lists every joined group; give no JID with it")
+	}
 	return WithConnection(func(db *store.DB, client *whatsapp.Client) error {
 		// If JID provided, show group info
 		if len(args) > 0 {
@@ -61,62 +68,21 @@ func runGroups(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to get group info: %w", err)
 			}
 
-			var participants []store.Participant
-			for _, p := range info.Participants {
-				name := ""
-				var lidStr, phoneStr *string
+			return Output(groupInfo(db, client, info))
+		}
 
-				lookupJID := p.JID
-				if !p.PhoneNumber.IsEmpty() {
-					lookupJID = p.PhoneNumber
-				}
-
-				if contact, err := client.WA.Store.Contacts.GetContact(context.Background(), lookupJID); err == nil {
-					if contact.FullName != "" {
-						name = contact.FullName
-					} else if contact.PushName != "" {
-						name = contact.PushName
-					}
-				}
-
-				if name == "" && p.DisplayName != "" {
-					name = p.DisplayName
-				}
-
-				if !p.LID.IsEmpty() {
-					lid := p.LID.User
-					lidStr = &lid
-
-					phone := ""
-					if !p.PhoneNumber.IsEmpty() {
-						phone = p.PhoneNumber.User
-						phoneStr = &phone
-					}
-					_ = db.StoreLIDMapping(lid, phone, name)
-				}
-
-				if !p.PhoneNumber.IsEmpty() && phoneStr == nil {
-					phone := p.PhoneNumber.User
-					phoneStr = &phone
-				}
-
-				participants = append(participants, store.Participant{
-					JID:     p.JID.String(),
-					LID:     lidStr,
-					Phone:   phoneStr,
-					IsAdmin: p.IsAdmin || p.IsSuperAdmin,
-					Name:    name,
-				})
+		// Every joined group with its members, read from WhatsApp in one request
+		if groupsMembers {
+			infos, err := client.WA.GetJoinedGroups(context.Background())
+			if err != nil {
+				return fmt.Errorf("failed to get joined groups: %w", err)
 			}
 
-			return Output(store.GroupInfo{
-				JID:          info.JID.String(),
-				Name:         info.Name,
-				Topic:        info.Topic,
-				Created:      info.GroupCreated,
-				CreatorJID:   info.OwnerJID.String(),
-				Participants: participants,
-			})
+			groups := make([]store.GroupInfo, 0, len(infos))
+			for _, info := range infos {
+				groups = append(groups, groupInfo(db, client, info))
+			}
+			return Output(groups)
 		}
 
 		// List all groups from local database
@@ -127,6 +93,67 @@ func runGroups(cmd *cobra.Command, args []string) error {
 
 		return Output(groups)
 	})
+}
+
+// groupInfo is a group as `groups <jid>` prints it: its participants named
+// from the contact store, each LID stored with its phone number.
+func groupInfo(db *store.DB, client *whatsapp.Client, info *types.GroupInfo) store.GroupInfo {
+	var participants []store.Participant
+	for _, p := range info.Participants {
+		name := ""
+		var lidStr, phoneStr *string
+
+		lookupJID := p.JID
+		if !p.PhoneNumber.IsEmpty() {
+			lookupJID = p.PhoneNumber
+		}
+
+		if contact, err := client.WA.Store.Contacts.GetContact(context.Background(), lookupJID); err == nil {
+			if contact.FullName != "" {
+				name = contact.FullName
+			} else if contact.PushName != "" {
+				name = contact.PushName
+			}
+		}
+
+		if name == "" && p.DisplayName != "" {
+			name = p.DisplayName
+		}
+
+		if !p.LID.IsEmpty() {
+			lid := p.LID.User
+			lidStr = &lid
+
+			phone := ""
+			if !p.PhoneNumber.IsEmpty() {
+				phone = p.PhoneNumber.User
+				phoneStr = &phone
+			}
+			_ = db.StoreLIDMapping(lid, phone, name)
+		}
+
+		if !p.PhoneNumber.IsEmpty() && phoneStr == nil {
+			phone := p.PhoneNumber.User
+			phoneStr = &phone
+		}
+
+		participants = append(participants, store.Participant{
+			JID:     p.JID.String(),
+			LID:     lidStr,
+			Phone:   phoneStr,
+			IsAdmin: p.IsAdmin || p.IsSuperAdmin,
+			Name:    name,
+		})
+	}
+
+	return store.GroupInfo{
+		JID:          info.JID.String(),
+		Name:         info.Name,
+		Topic:        info.Topic,
+		Created:      info.GroupCreated,
+		CreatorJID:   info.OwnerJID.String(),
+		Participants: participants,
+	}
 }
 
 func runGroupsJoin(cmd *cobra.Command, args []string) error {
