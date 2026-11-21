@@ -17,6 +17,7 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/eddmann/whatsapp-cli/internal/store"
 )
@@ -89,6 +90,7 @@ func New(db *store.DB, baseDir string, verbose bool, logger *slog.Logger) (*Clie
 	}
 
 	applyDeviceName(os.Getenv("WHATSAPP_DEVICE_NAME"))
+	requestFullHistory()
 	client := whatsmeow.NewClient(deviceStore, waLogger)
 	if client == nil {
 		return nil, fmt.Errorf("failed to create client")
@@ -266,6 +268,22 @@ func (c *Client) resolvePreferredName(jid interface{}) string {
 	}
 
 	return parsedJID.User
+}
+
+// fullHistoryDays is how far back the history sync at link time asks the
+// phone to reach: ten years, so in practice every chat's whole history.
+const fullHistoryDays = 3650
+
+// requestFullHistory asks the phone, at link time, for a full history sync
+// rather than whatsmeow's default (recent messages only, the rest left to
+// on-demand backfill one chat at a time): RequireFullSync, with a days limit
+// that covers every chat and no size limit. It applies when the device is
+// linked; a device linked before keeps the history it was given.
+func requestFullHistory() {
+	wastore.DeviceProps.RequireFullSync = proto.Bool(true)
+	config := wastore.DeviceProps.HistorySyncConfig
+	config.FullSyncDaysLimit = proto.Uint32(fullHistoryDays)
+	config.FullSyncSizeMbLimit = nil
 }
 
 // applyDeviceName names this linked device as the phone lists it under
